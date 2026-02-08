@@ -104,10 +104,10 @@ def seed_demo_users():
 
     demo_users = [
         {
-            "username": "alice_saves",
-            "email": "alice@demo.com",
-            "password": "demo123",
-            "name": "Alice Johnson",
+            "username": "suhanimathur",
+            "email": "suhanimathur@demo.com",
+            "password": "1234",
+            "name": "Suhani Mathur",
             "game_points": 450,
             "game_currency": 230,
             "current_streak": 12
@@ -258,7 +258,7 @@ def main():
 
         print("\n✓ Demo data seeded successfully!")
         print("\nDemo Login Credentials:")
-        print("Username: alice_saves | Password: demo123")
+        print("Username: suhanimathur | Password: 1234")
         print("Username: bob_budgets | Password: demo123")
         print("Username: carol_goals | Password: demo123")
 

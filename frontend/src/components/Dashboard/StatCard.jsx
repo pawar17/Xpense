@@ -9,8 +9,7 @@ export default function StatCard({ icon, value, label, color, onClick }) {
       className={onClick ? 'text-left cursor-pointer border-none bg-transparent p-0 min-w-[100px] flex-1 block' : undefined}
     >
       <motion.div
-        whileHover={{ y: -4 }}
-        className={`min-w-[100px] flex-1 p-4 rounded-[1.5rem] border-2 border-brand-black shadow-[4px_4px_0px_#1A1A1A] ${color} flex flex-col items-center gap-1 ${onClick ? 'hover:ring-2 hover:ring-brand-black/20' : ''}`}
+        className={`min-w-[100px] flex-1 p-4 rounded-[1.5rem] border-2 border-brand-black shadow-[4px_4px_0px_#1A1A1A] ${color} flex flex-col items-center gap-1`}
       >
         <div className="text-2xl mb-1">{icon}</div>
         <div className="text-xl font-heading text-brand-black leading-none uppercase">{value}</div>

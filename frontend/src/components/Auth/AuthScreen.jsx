@@ -97,7 +97,7 @@ export default function AuthScreen({ onLoginSuccess }) {
 
         <div className="editorial-card p-4 mt-4">
           <p className="text-[9px] font-mono font-bold text-gray-500 uppercase tracking-widest mb-1">Demo</p>
-          <p className="text-xs font-mono">alice_saves / demo123</p>
+          <p className="text-xs font-mono">suhanimathur / 1234</p>
         </div>
       </div>
     </div>

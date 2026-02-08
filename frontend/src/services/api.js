@@ -115,6 +115,16 @@ export const bankStatementService = {
 };
 
 // ============================================================================
+// FEED & POSTS
+// ============================================================================
+
+export const feedService = {
+  getFeed: (params) => api.get('/feed', { params: params || {} }),
+  likePost: (postId) => api.post(`/posts/${postId}/like`),
+  addComment: (postId, data) => api.post(`/posts/${postId}/comments`, data),
+};
+
+// ============================================================================
 // FRIENDS & NUDGES
 // ============================================================================
 

@@ -18,8 +18,8 @@ import AddVetoRequest from './components/Social/AddVetoRequest';
 import AIChat from './components/Chat/AIChat';
 import GameWorld from './components/World/GameWorld';
 import Confetti from './components/Feedback/Confetti';
-import { MOCK_FEED, MOCK_FRIENDS } from './constants';
-import { vetoService, gamificationService, friendsService, nudgeService, questService } from './services/api';
+import { MOCK_FRIENDS } from './constants';
+import { vetoService, gamificationService, friendsService, nudgeService, questService, feedService } from './services/api';
 import toast from 'react-hot-toast';
 
 const pageVariants = {
@@ -55,7 +55,7 @@ export default function App() {
   const [showFriendPicker, setShowFriendPicker] = useState(false);
   const [showAddVeto, setShowAddVeto] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
-  const [feed] = useState(MOCK_FEED);
+  const [feed, setFeed] = useState([]);
   const [vetoRequests, setVetoRequests] = useState([]);
   const [friends, setFriends] = useState([]);
   const [nudgedUserIds, setNudgedUserIds] = useState([]);
@@ -163,10 +163,20 @@ export default function App() {
     }
   }, [activeTab]);
 
+  const fetchFeed = async () => {
+    try {
+      const { data } = await feedService.getFeed();
+      setFeed(data.posts || []);
+    } catch (_) {
+      setFeed([]);
+    }
+  };
+
   useEffect(() => {
     if (activeTab === 'social') {
       fetchStats();
       fetchVetoRequests();
+      fetchFeed();
     }
   }, [activeTab]);
 
@@ -636,7 +646,27 @@ export default function App() {
               </section>
               <section className="space-y-6">
                 <h2 className="font-heading text-2xl uppercase tracking-tighter">Feed</h2>
-                <SocialFeed posts={feed} onNudge={() => setShowFriendPicker(true)} />
+                <SocialFeed
+                  posts={feed}
+                  onNudge={() => setShowFriendPicker(true)}
+                  onLike={async (postId) => {
+                    try {
+                      await feedService.likePost(postId);
+                      fetchFeed();
+                    } catch (e) {
+                      toast.error(e.response?.data?.error || 'Could not like post');
+                    }
+                  }}
+                  onComment={async (postId, text) => {
+                    try {
+                      await feedService.addComment(postId, { text });
+                      fetchFeed();
+                    } catch (e) {
+                      toast.error(e.response?.data?.error || 'Could not post comment');
+                    }
+                  }}
+                  onRefresh={fetchFeed}
+                />
               </section>
             </motion.div>
           )}
