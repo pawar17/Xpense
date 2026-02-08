@@ -17,7 +17,10 @@ GEMINI_GOAL_MODEL = "gemini-2.0-flash"
 
 def calculate_levels_with_ai(goal_data, user_data=None):
     """
-    Calculate optimal savings levels using AI
+    Calculate optimal savings levels using AI with sophisticated financial analysis.
+    Uses Gemini to determine:
+    - Appropriate number of levels based on goal size and complexity
+    - Realistic daily contribution based on actual income and expenses
     Falls back to basic calculation if AI fails
     """
     if user_data is None:
@@ -39,7 +42,11 @@ def calculate_levels_with_ai(goal_data, user_data=None):
     avg_expenses = user_data.get('avg_expenses') or 2200
     from_statement = user_data.get('from_bank_statement', False)
 
-    # Default level count by remaining amount
+    # Calculate disposable income
+    monthly_disposable = max(0, monthly_income - avg_expenses)
+    daily_disposable = round(monthly_disposable / 30, 2)
+
+    # Default level count by remaining amount (fallback)
     if remaining < 500:
         total_levels = 10
     elif remaining < 2000:
@@ -56,39 +63,72 @@ def calculate_levels_with_ai(goal_data, user_data=None):
     ]
     daily_target = round(remaining / days_to_goal, 2)
 
-    # Try AI enhancement (Gemini): suggest levels and daily target from income/expenses
+    # Try AI enhancement (Gemini): Use sophisticated analysis for levels and daily target
     try:
         prompt = f"""
-You are a financial coach. Using the user's goal and (when available) their bank statement income and expenses, suggest a realistic level plan and messages.
+You are an expert financial advisor analyzing a user's savings goal. Based on their actual financial data and the goal characteristics, calculate the optimal savings plan.
 
-Goal:
-- Target amount: ${goal_data['target_amount']}
-- Current amount: ${current}
-- Remaining: ${remaining}
-- Category: {goal_data.get('category', 'general')}
-- Days to goal: {days_to_goal}
-
-User finances (from bank statement when available):
-- Monthly income (earnings): ${monthly_income}
+FINANCIAL DATA (from bank statement):
+- Monthly income: ${monthly_income}
 - Monthly expenses: ${avg_expenses}
-- From bank statement data: {from_statement}
-- Current streak: {user_data.get('current_streak', 0)} days
+- Disposable income per month: ${monthly_disposable}
+- Disposable income per day: ${daily_disposable}
+- Data from actual bank statement: {from_statement}
+- Current savings streak: {user_data.get('current_streak', 0)} days
 
-Suggest a realistic plan:
-1. suggested_total_levels: number between 10 and 50 (more levels = smaller steps; consider income minus expenses to keep each level achievable).
-2. suggested_daily_target: daily savings amount that is realistic given their income and expenses (number, e.g. 15.50).
-3. daily_savings_tip: One specific, actionable tip (max 80 chars).
-4. milestone_message_25, milestone_message_50, milestone_message_75: Short motivational messages (max 50 chars each).
-5. completion_message: Celebratory message for 100% (max 50 chars).
+GOAL DETAILS:
+- Goal name/category: {goal_data.get('category', 'general')}
+- Target amount: ${goal_data['target_amount']}
+- Current saved: ${current}
+- Remaining to save: ${remaining}
+- Days until deadline: {days_to_goal}
+- Simple math (remaining/days): ${round(remaining / days_to_goal, 2)}/day
 
-Return valid JSON only, no markdown. Example:
-{{"suggested_total_levels": 25, "suggested_daily_target": 12.50, "daily_savings_tip": "Skip one takeout per week", "milestone_message_25": "Quarter way there!", "milestone_message_50": "Halfway!", "milestone_message_75": "Almost there!", "completion_message": "Goal achieved!"}}
+YOUR TASK:
+1. Determine the appropriate number of levels (5-50) based on goal COMPLEXITY and SIZE:
+   - Small items like jackets, accessories, gadgets: 5-10 levels (achievable quickly)
+   - Medium items like laptops, trips, furniture: 15-25 levels (moderate motivation)
+   - Large items like cars, down payments: 30-40 levels (sustained effort)
+   - Major items like houses, large investments: 45-50 levels (long-term commitment)
+
+   The NUMBER OF LEVELS should match the psychological complexity and time commitment of the goal.
+   A $50,000 house down payment MUST have 45-50 levels. A $50 jacket MUST have 5-10 levels.
+
+2. Calculate a REALISTIC daily contribution that:
+   - Fits within their disposable income (${daily_disposable}/day available)
+   - Reaches the goal by the deadline ({days_to_goal} days)
+   - Accounts for unexpected expenses (leave some buffer)
+   - Is achievable and sustainable (not too aggressive)
+
+3. If the goal is mathematically impossible (requires more than disposable income), suggest the maximum sustainable amount.
+
+4. Provide motivational messages tailored to the goal type.
+
+Return ONLY valid JSON (no markdown, no code blocks):
+{{
+  "suggested_total_levels": <number 5-50>,
+  "suggested_daily_target": <realistic dollar amount>,
+  "is_achievable": <true/false>,
+  "daily_savings_tip": "<specific actionable tip, max 80 chars>",
+  "milestone_message_25": "<motivational message, max 50 chars>",
+  "milestone_message_50": "<motivational message, max 50 chars>",
+  "milestone_message_75": "<motivational message, max 50 chars>",
+  "completion_message": "<celebration message, max 50 chars>",
+  "financial_analysis": "<brief explanation of the calculation>"
+}}
+
+Example for a $50 jacket goal:
+{{"suggested_total_levels": 8, "suggested_daily_target": 2.50, "is_achievable": true, "daily_savings_tip": "Skip one coffee this week", "milestone_message_25": "Great start!", "milestone_message_50": "Halfway there!", "milestone_message_75": "Almost yours!", "completion_message": "Time to shop!", "financial_analysis": "Small purchase, 8 levels keeps it simple and achievable within 20 days at $2.50/day"}}
+
+Example for a $40,000 house down payment:
+{{"suggested_total_levels": 50, "suggested_daily_target": 45.00, "is_achievable": true, "daily_savings_tip": "Review subscriptions, cook at home 4x/week", "milestone_message_25": "Building your future!", "milestone_message_50": "Halfway to homeownership!", "milestone_message_75": "Your dream is close!", "completion_message": "Welcome home!", "financial_analysis": "Major goal requires 50 levels for sustained motivation. At $45/day with ${daily_disposable}/day disposable, achievable in {days_to_goal} days with discipline"}}
 """
 
         model = genai.GenerativeModel(GEMINI_GOAL_MODEL)
         response = model.generate_content(prompt)
 
         ai_text = response.text.strip()
+        # Clean up markdown code blocks
         if '```json' in ai_text:
             ai_text = ai_text.split('```json')[1].split('```')[0].strip()
         elif '```' in ai_text:
@@ -98,11 +138,12 @@ Return valid JSON only, no markdown. Example:
 
         # Use AI-suggested levels if valid
         sug_levels = ai_data.get('suggested_total_levels')
-        if isinstance(sug_levels, (int, float)) and 10 <= int(sug_levels) <= 50:
+        if isinstance(sug_levels, (int, float)) and 5 <= int(sug_levels) <= 50:
             total_levels = int(sug_levels)
             amount_per_level = remaining / total_levels
             level_thresholds = [current + (amount_per_level * i) for i in range(1, total_levels + 1)]
 
+        # Use AI-suggested daily target
         sug_daily = ai_data.get('suggested_daily_target')
         if isinstance(sug_daily, (int, float)) and float(sug_daily) >= 0:
             daily_target = round(float(sug_daily), 2)
@@ -125,9 +166,173 @@ Return valid JSON only, no markdown. Example:
                 'milestone_message_25': "Quarter way there! Keep going!",
                 'milestone_message_50': "Halfway done! You're crushing it!",
                 'milestone_message_75': "Almost there! Sprint to the finish!",
-                'completion_message': "Goal achieved! Time to celebrate!"
+                'completion_message': "Goal achieved! Time to celebrate!",
+                'is_achievable': daily_target <= daily_disposable * 0.8 if daily_disposable > 0 else True,
+                'financial_analysis': f"Standard calculation: ${daily_target}/day over {days_to_goal} days"
             }
         }
+
+def calculate_multiple_goals_with_ai(goals_data, user_data=None):
+    """
+    Calculate daily contributions for multiple goals simultaneously.
+    Uses Gemini to intelligently allocate disposable income across goals based on:
+    - Priority (deadline urgency)
+    - Goal size and complexity
+    - Available financial capacity
+
+    Returns a dict with per-goal recommendations.
+    """
+    if user_data is None:
+        user_data = {}
+
+    if not goals_data or len(goals_data) == 0:
+        return {}
+
+    # If only one goal, use the single-goal function
+    if len(goals_data) == 1:
+        result = calculate_levels_with_ai(goals_data[0], user_data)
+        return {goals_data[0].get('goal_id', 0): result}
+
+    monthly_income = user_data.get('monthly_income') or 3000
+    avg_expenses = user_data.get('avg_expenses') or 2200
+    from_statement = user_data.get('from_bank_statement', False)
+
+    # Calculate disposable income
+    monthly_disposable = max(0, monthly_income - avg_expenses)
+    daily_disposable = round(monthly_disposable / 30, 2)
+
+    # Prepare goals summary for Gemini
+    goals_summary = []
+    for i, goal in enumerate(goals_data):
+        remaining = goal['target_amount'] - goal.get('current_amount', 0)
+        days_to_goal = 180
+        if goal.get('target_date'):
+            target_date = goal['target_date']
+            if isinstance(target_date, str):
+                target_date = datetime.fromisoformat(target_date.replace('Z', '+00:00'))
+            days_to_goal = max((target_date - datetime.utcnow()).days, 30)
+
+        goals_summary.append({
+            'id': i,
+            'name': goal.get('goal_name', 'Goal'),
+            'category': goal.get('category', 'general'),
+            'target': goal['target_amount'],
+            'current': goal.get('current_amount', 0),
+            'remaining': remaining,
+            'days': days_to_goal
+        })
+
+    try:
+        prompt = f"""
+You are a financial advisor helping a user save for MULTIPLE goals simultaneously. Analyze their financial capacity and intelligently allocate daily contributions across all goals.
+
+FINANCIAL CAPACITY:
+- Monthly income: ${monthly_income}
+- Monthly expenses: ${avg_expenses}
+- Disposable income per month: ${monthly_disposable}
+- Disposable income per day: ${daily_disposable}
+- Data from bank statement: {from_statement}
+
+GOALS TO MANAGE:
+{json.dumps(goals_summary, indent=2)}
+
+YOUR TASK:
+1. For EACH goal, determine:
+   a) Number of levels (5-50) based on goal size and complexity
+      - Small items (< $500): 5-10 levels
+      - Medium items ($500-$5,000): 15-25 levels
+      - Large items ($5,000-$20,000): 30-40 levels
+      - Major items (> $20,000): 45-50 levels
+
+   b) Realistic daily contribution that:
+      - When SUMMED across ALL goals, fits within ${daily_disposable}/day
+      - Prioritizes urgent goals (fewer days remaining)
+      - Ensures all goals can be completed by their deadlines if possible
+      - Leaves some buffer (use max 80% of disposable income)
+
+2. If total required contributions exceed capacity, prioritize by deadline and adjust.
+
+3. Return suggestions for each goal with motivational messages.
+
+Return ONLY valid JSON (no markdown):
+{{
+  "total_daily_allocation": <sum of all daily targets>,
+  "is_feasible": <true/false - can all goals be met?>,
+  "overall_tip": "<advice for managing multiple goals, max 100 chars>",
+  "goals": [
+    {{
+      "id": <goal id from input>,
+      "suggested_total_levels": <5-50>,
+      "suggested_daily_target": <realistic amount>,
+      "priority_rank": <1 for highest priority>,
+      "daily_savings_tip": "<specific tip, max 80 chars>",
+      "milestone_message_25": "<message, max 50 chars>",
+      "milestone_message_50": "<message, max 50 chars>",
+      "milestone_message_75": "<message, max 50 chars>",
+      "completion_message": "<message, max 50 chars>"
+    }}
+  ]
+}}
+"""
+
+        model = genai.GenerativeModel(GEMINI_GOAL_MODEL)
+        response = model.generate_content(prompt)
+
+        ai_text = response.text.strip()
+        if '```json' in ai_text:
+            ai_text = ai_text.split('```json')[1].split('```')[0].strip()
+        elif '```' in ai_text:
+            ai_text = ai_text.split('```')[1].split('```')[0].strip()
+
+        ai_data = json.loads(ai_text)
+
+        # Process results for each goal
+        results = {}
+        for goal_result in ai_data.get('goals', []):
+            goal_id = goal_result.get('id')
+            if goal_id is None or goal_id >= len(goals_data):
+                continue
+
+            goal = goals_data[goal_id]
+            remaining = goal['target_amount'] - goal.get('current_amount', 0)
+            current = goal.get('current_amount', 0)
+
+            total_levels = goal_result.get('suggested_total_levels', 20)
+            total_levels = max(5, min(50, int(total_levels)))
+
+            amount_per_level = remaining / total_levels
+            level_thresholds = [current + (amount_per_level * i) for i in range(1, total_levels + 1)]
+
+            daily_target = round(float(goal_result.get('suggested_daily_target', 0)), 2)
+
+            results[goal.get('goal_id', goal_id)] = {
+                'total_levels': total_levels,
+                'level_thresholds': level_thresholds,
+                'daily_target': daily_target,
+                'priority_rank': goal_result.get('priority_rank', goal_id + 1),
+                'ai_suggestions': {
+                    'daily_savings_tip': goal_result.get('daily_savings_tip', 'Stay focused on your goal'),
+                    'milestone_message_25': goal_result.get('milestone_message_25', 'Great progress!'),
+                    'milestone_message_50': goal_result.get('milestone_message_50', 'Halfway there!'),
+                    'milestone_message_75': goal_result.get('milestone_message_75', 'Almost done!'),
+                    'completion_message': goal_result.get('completion_message', 'Goal achieved!'),
+                    'is_feasible': ai_data.get('is_feasible', True),
+                    'overall_tip': ai_data.get('overall_tip', 'Focus on one goal at a time'),
+                    'total_daily_allocation': ai_data.get('total_daily_allocation', 0)
+                }
+            }
+
+        return results
+
+    except Exception as e:
+        print(f"Multi-goal AI calculation failed: {e}, using individual calculations")
+        # Fallback: calculate each goal individually
+        results = {}
+        for i, goal in enumerate(goals_data):
+            result = calculate_levels_with_ai(goal, user_data)
+            results[goal.get('goal_id', i)] = result
+        return results
+
 
 def _is_google_ai_configured():
     key = os.getenv('GOOGLE_AI_API_KEY') or ''

@@ -149,3 +149,94 @@ class Goal:
                 }
             }
         )
+
+    def get_manifestation_goal(self, user_id):
+        """Get the #1 priority goal (lowest order number) for display on dashboard"""
+        if isinstance(user_id, str):
+            user_id = ObjectId(user_id)
+
+        # Get active or queued goal with lowest order (highest priority)
+        return self.collection.find_one(
+            {"user_id": user_id, "status": {"$in": ["active", "queued"]}},
+            sort=[("order", 1)]  # Ascending order = lowest first
+        )
+
+    def check_expired_goals(self, user_id):
+        """Check for goals past their target_date with no contributions and mark as pending"""
+        if isinstance(user_id, str):
+            user_id = ObjectId(user_id)
+
+        now = datetime.utcnow()
+
+        # Find goals that are past deadline with $0 saved
+        expired_goals = self.collection.find({
+            "user_id": user_id,
+            "status": {"$in": ["active", "queued"]},
+            "target_date": {"$lt": now},
+            "current_amount": 0
+        })
+
+        updated_count = 0
+        for goal in expired_goals:
+            self.collection.update_one(
+                {"_id": goal["_id"]},
+                {
+                    "$set": {
+                        "status": "pending",
+                        "updated_at": now
+                    }
+                }
+            )
+            updated_count += 1
+
+        return updated_count
+
+    def archive_goal(self, goal_id, user_id):
+        """Move a completed or pending goal to archive"""
+        if isinstance(goal_id, str):
+            goal_id = ObjectId(goal_id)
+        if isinstance(user_id, str):
+            user_id = ObjectId(user_id)
+
+        goal = self.get_goal_by_id(goal_id)
+        if not goal or goal["user_id"] != user_id:
+            return None
+
+        # Only archive completed or pending goals
+        if goal["status"] not in ["completed", "pending"]:
+            return None
+
+        result = self.collection.update_one(
+            {"_id": goal_id, "user_id": user_id},
+            {
+                "$set": {
+                    "status": "archived",
+                    "updated_at": datetime.utcnow()
+                }
+            }
+        )
+        return result
+
+    def get_archived_goals(self, user_id):
+        """Get all archived goals for a user"""
+        if isinstance(user_id, str):
+            user_id = ObjectId(user_id)
+
+        return list(self.collection.find(
+            {"user_id": user_id, "status": "archived"}
+        ).sort("completed_at", -1))
+
+    def delete_goal(self, goal_id, user_id):
+        """Delete a goal (only if archived)"""
+        if isinstance(goal_id, str):
+            goal_id = ObjectId(goal_id)
+        if isinstance(user_id, str):
+            user_id = ObjectId(user_id)
+
+        # Only allow deleting archived goals
+        result = self.collection.delete_one({
+            "_id": goal_id,
+            "user_id": user_id,
+            "status": "archived"
+        })
+        return result.deleted_count > 0

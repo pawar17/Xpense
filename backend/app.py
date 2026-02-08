@@ -30,6 +30,7 @@ from data.mock_statement_v4 import (
 )
 from models.bank_statement import BankStatement
 from models.nudge import Nudge
+from models.post import Post
 from werkzeug.utils import secure_filename
 import uuid
 
@@ -52,6 +53,7 @@ daily_flow_model = DailyFlow(db)
 veto_request_model = VetoRequestModel(db)
 bank_statement_model = BankStatement(db)
 nudge_model = Nudge(db)
+post_model = Post(db)
 
 
 def _serialize_user_for_json(user):
@@ -503,28 +505,39 @@ def contribute_to_goal(goal_id):
         # Get updated goal (the one user originally contributed to)
         updated_goal = goal_model.get_goal_by_id(goal_id)
         new_level = updated_goal['current_level'] if updated_goal else old_level
+        is_completed = updated_goal and updated_goal['status'] == 'completed'
+        was_not_completed = goal['status'] != 'completed'
 
         # Award points if leveled up
+        points_earned = 0
+        currency_earned = 0
+
         if new_level > old_level:
             points_earned = (new_level - old_level) * 50
             currency_earned = (new_level - old_level) * 25
+
+        # Award +10 XP bonus if goal was just completed
+        if is_completed and was_not_completed:
+            points_earned += 10
+            message = "🎉 Goal completed! +10 XP bonus!"
+        elif new_level > old_level:
+            message = "Level up!"
+        else:
+            message = "Contribution added"
+
+        if points_earned > 0 or currency_earned > 0:
             user_model.update_game_stats(request.user_id, points=points_earned, currency=currency_earned)
 
-            return jsonify({
-                "message": "Level up!",
-                "goal": _format_goal(updated_goal),
-                "level_up": True,
-                "new_level": new_level,
-                "rewards": {
-                    "points": points_earned,
-                    "currency": currency_earned
-                }
-            }), 200
-
         return jsonify({
-            "message": "Contribution added",
+            "message": message,
             "goal": _format_goal(updated_goal),
-            "level_up": False
+            "level_up": new_level > old_level,
+            "goal_completed": is_completed and was_not_completed,
+            "new_level": new_level,
+            "rewards": {
+                "points": points_earned,
+                "currency": currency_earned
+            }
         }), 200
 
     except Exception as e:
@@ -876,11 +889,10 @@ def delete_bank_statement(statement_id):
 @app.route('/api/bank-statements/spending-analysis', methods=['GET'])
 @jwt_required
 def spending_analysis():
-    """Get spending by category and suggested daily savings. Uses hardcoded v4 data."""
+    """Get spending by category and suggested daily savings. Shows financial breakdown only after user has uploaded at least one PDF (then uses hardcoded v4 data so it appears the PDF was read)."""
     try:
-        mock = get_mock_spending_analysis()
-        spending_by_category = mock["spendingByCategory"]
-        transaction_count = mock["transactionCount"]
+        statements = bank_statement_model.get_user_statements(request.user_id, limit=1)
+        has_uploaded_statement = len(statements) > 0
 
         goals = goal_model.get_user_goals(request.user_id, status="active")
         goal = goals[0] if goals else None
@@ -889,15 +901,27 @@ def spending_analysis():
         target_date = goal.get("target_date") if goal else None
         goal_name = goal.get("goal_name", "") if goal else ""
 
-        suggestion = get_mock_suggestion(target_amount, current_amount, target_date, goal_name)
-
-        return jsonify({
-            "spendingByCategory": spending_by_category,
-            "suggestion": suggestion,
-            "goalName": goal_name,
-            "transactionCount": transaction_count,
-            "hasStatementData": True,
-        }), 200
+        if has_uploaded_statement:
+            mock = get_mock_spending_analysis()
+            spending_by_category = mock["spendingByCategory"]
+            transaction_count = mock["transactionCount"]
+            suggestion = get_mock_suggestion(target_amount, current_amount, target_date, goal_name)
+            return jsonify({
+                "spendingByCategory": spending_by_category,
+                "suggestion": suggestion,
+                "goalName": goal_name,
+                "transactionCount": transaction_count,
+                "hasStatementData": True,
+            }), 200
+        else:
+            suggestion = get_mock_suggestion(target_amount, current_amount, target_date, goal_name)
+            return jsonify({
+                "spendingByCategory": {},
+                "suggestion": suggestion,
+                "goalName": goal_name,
+                "transactionCount": 0,
+                "hasStatementData": False,
+            }), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -909,7 +933,7 @@ def spending_analysis():
 @app.route('/api/goals/<goal_id>', methods=['PATCH'])
 @jwt_required
 def update_goal(goal_id):
-    """Update a goal (name, category, target_amount, target_date, status)."""
+    """Update a goal (name, category, target_amount, target_date, status). Recalculates levels if amount/date changes."""
     try:
         goal = goal_model.get_goal_by_id(goal_id)
         if not goal:
@@ -923,8 +947,57 @@ def update_goal(goal_id):
         if not update:
             return jsonify({"message": "Nothing to update", "goal": _format_goal(goal)}), 200
 
+        # Check if we need to recalculate levels (if target_amount or target_date changed)
+        needs_recalc = ('target_amount' in update and update['target_amount'] != goal['target_amount']) or \
+                       ('target_date' in update and update['target_date'] != goal['target_date'])
+
         goal_model.update_goal(goal_id, update)
         updated = goal_model.get_goal_by_id(goal_id)
+
+        # Recalculate levels with AI if amount or date changed
+        if needs_recalc:
+            user = user_model.find_by_id(request.user_id)
+            monthly_income = 3000
+            avg_expenses = 2200
+
+            # Get financial data from bank statements
+            try:
+                txns = bank_statement_model.get_user_transactions(request.user_id, limit=500)
+                if txns:
+                    income = sum(float(t.get('amount') or 0) for t in txns if float(t.get('amount') or 0) > 0)
+                    expenses = sum(abs(float(t.get('amount') or 0)) for t in txns if float(t.get('amount') or 0) < 0)
+                    if income > 0 or expenses > 0:
+                        monthly_income = max(1, round(income, 2)) if income > 0 else 3000
+                        avg_expenses = round(expenses, 2) if expenses > 0 else 2200
+            except Exception:
+                pass
+
+            # Recalculate with AI
+            ai_result = calculate_levels_with_ai(
+                {
+                    'target_amount': updated['target_amount'],
+                    'current_amount': updated['current_amount'],
+                    'category': updated['goal_category'],
+                    'target_date': updated.get('target_date')
+                },
+                {
+                    'monthly_income': monthly_income,
+                    'avg_expenses': avg_expenses,
+                    'current_streak': user.get('current_streak', 0),
+                    'from_bank_statement': monthly_income != 3000 or avg_expenses != 2200,
+                }
+            )
+
+            # Update with new calculations
+            goal_model.set_level_system(
+                goal_id,
+                ai_result['total_levels'],
+                ai_result['level_thresholds'],
+                ai_result['daily_target']
+            )
+
+            updated = goal_model.get_goal_by_id(goal_id)
+
         return jsonify({"message": "Goal updated", "goal": _format_goal(updated)}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -943,6 +1016,77 @@ def reorder_goals():
                 goal_model.update_goal(gid, {"order": i})
         goals = goal_model.get_user_goals(request.user_id)
         return jsonify({"goals": [_format_goal(g) for g in goals]}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/goals/manifestation', methods=['GET'])
+@jwt_required
+def get_manifestation_goal():
+    """Get the #1 priority goal (lowest order number) to display on dashboard as Active Manifestation."""
+    try:
+        # Check and update expired goals first
+        goal_model.check_expired_goals(request.user_id)
+
+        # Get the manifestation goal (priority #1)
+        goal = goal_model.get_manifestation_goal(request.user_id)
+        if not goal:
+            return jsonify({"goal": None, "message": "No active goals"}), 200
+
+        return jsonify({"goal": _format_goal(goal)}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/goals/<goal_id>/archive', methods=['POST'])
+@jwt_required
+def archive_goal(goal_id):
+    """Move a completed or pending goal to archive."""
+    try:
+        result = goal_model.archive_goal(goal_id, request.user_id)
+        if not result:
+            return jsonify({"error": "Goal not found or cannot be archived (must be completed or pending)"}), 400
+
+        return jsonify({"message": "Goal archived successfully"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/goals/archived', methods=['GET'])
+@jwt_required
+def get_archived_goals():
+    """Get all archived goals for the current user."""
+    try:
+        goals = goal_model.get_archived_goals(request.user_id)
+        return jsonify({"goals": [_format_goal(g) for g in goals]}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/goals/<goal_id>', methods=['DELETE'])
+@jwt_required
+def delete_goal(goal_id):
+    """Delete an archived goal permanently."""
+    try:
+        deleted = goal_model.delete_goal(goal_id, request.user_id)
+        if not deleted:
+            return jsonify({"error": "Goal not found or cannot be deleted (must be archived)"}), 400
+
+        return jsonify({"message": "Goal deleted successfully"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/goals/check-expired', methods=['POST'])
+@jwt_required
+def check_expired_goals():
+    """Manually trigger check for expired goals (marks as pending if date passed with $0 saved)."""
+    try:
+        updated_count = goal_model.check_expired_goals(request.user_id)
+        return jsonify({
+            "message": f"{updated_count} goal(s) marked as pending",
+            "updated_count": updated_count
+        }), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -1158,6 +1302,267 @@ def mark_nudge_read(nudge_id):
     try:
         nudge_model.mark_read(nudge_id, request.user_id)
         return jsonify({"message": "Marked as read"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ============================================================================
+# FEED & POSTS
+# ============================================================================
+
+def _format_post(post, current_user_id=None):
+    """Format post for JSON response with user details and formatted comments"""
+    if not post:
+        return None
+
+    from bson import ObjectId
+    from datetime import datetime
+
+    # Get user details
+    user = user_model.find_by_id(post.get("user_id"))
+    user_data = {
+        "id": str(post.get("user_id")),
+        "username": user.get("username", "unknown") if user else "unknown",
+        "name": user.get("name", "") if user else "",
+        "avatar": (user.get("name", "?")[0].upper() if user and user.get("name") else "👤")
+    }
+
+    # Format timestamp
+    def _format_timestamp(dt):
+        if isinstance(dt, datetime):
+            now = datetime.utcnow()
+            diff = now - dt
+            if diff.days > 0:
+                return f"{diff.days}d ago"
+            elif diff.seconds // 3600 > 0:
+                return f"{diff.seconds // 3600}h ago"
+            elif diff.seconds // 60 > 0:
+                return f"{diff.seconds // 60}m ago"
+            else:
+                return "Just now"
+        return "Recently"
+
+    created_at = post.get("created_at")
+    timestamp = _format_timestamp(created_at)
+
+    # Check if current user liked this post
+    likes = post.get("likes", [])
+    liked_by_current_user = False
+    if current_user_id:
+        current_oid = ObjectId(current_user_id) if isinstance(current_user_id, str) else current_user_id
+        liked_by_current_user = current_oid in likes
+
+    # Format comments with user details
+    comments_list = []
+    for comment in post.get("comments", []):
+        comment_user_id = comment.get("user_id")
+        comment_user = user_model.find_by_id(comment_user_id)
+
+        comments_list.append({
+            "user": {
+                "id": str(comment_user_id),
+                "username": comment_user.get("username", "unknown") if comment_user else "unknown",
+                "name": comment_user.get("name", "") if comment_user else "",
+                "avatar": (comment_user.get("name", "?")[0].upper() if comment_user and comment_user.get("name") else "👤")
+            },
+            "text": comment.get("text", ""),
+            "timestamp": _format_timestamp(comment.get("created_at")),
+            "created_at": comment.get("created_at").isoformat() if isinstance(comment.get("created_at"), datetime) else None
+        })
+
+    return {
+        "id": str(post["_id"]),
+        "user": user_data,
+        "content": post.get("content", ""),
+        "type": post.get("type", "update"),
+        "visibility": post.get("visibility", "public"),
+        "likes": len(likes),
+        "liked": liked_by_current_user,
+        "comments": len(post.get("comments", [])),
+        "commentsList": comments_list,
+        "timestamp": timestamp,
+        "created_at": created_at.isoformat() if isinstance(created_at, datetime) else None,
+        "metadata": post.get("metadata", {})
+    }
+
+
+@app.route('/api/feed', methods=['GET'])
+@jwt_required
+def get_feed():
+    """Get posts for the user's feed."""
+    try:
+        feed_type = request.args.get('type', 'all')  # all, friends, own
+        limit = int(request.args.get('limit', 50))
+        skip = int(request.args.get('skip', 0))
+
+        posts = post_model.get_feed(request.user_id, limit=limit, skip=skip, feed_type=feed_type)
+
+        return jsonify({
+            "posts": [_format_post(p, request.user_id) for p in posts]
+        }), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/posts', methods=['POST'])
+@jwt_required
+def create_post():
+    """Create a new post. Body: { content, type?, visibility?, metadata? }"""
+    try:
+        data = request.json or {}
+        content = (data.get("content") or "").strip()
+
+        if not content:
+            return jsonify({"error": "Content is required"}), 400
+
+        if len(content) > 500:
+            return jsonify({"error": "Content must be 500 characters or less"}), 400
+
+        post_type = data.get("type", "update")  # update, milestone, achievement, level-up, goal-completed
+        visibility = data.get("visibility", "public")  # public, friends-only, private
+        metadata = data.get("metadata", {})
+
+        post_id = post_model.create_post(
+            user_id=request.user_id,
+            content=content,
+            post_type=post_type,
+            visibility=visibility,
+            metadata=metadata
+        )
+
+        post = post_model.get_post_by_id(post_id)
+
+        return jsonify({
+            "message": "Post created successfully",
+            "post": _format_post(post, request.user_id)
+        }), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/posts/<post_id>', methods=['GET'])
+@jwt_required
+def get_post(post_id):
+    """Get a specific post by ID."""
+    try:
+        post = post_model.get_post_by_id(post_id)
+        if not post:
+            return jsonify({"error": "Post not found"}), 404
+
+        return jsonify({"post": _format_post(post, request.user_id)}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/posts/<post_id>', methods=['PATCH'])
+@jwt_required
+def update_post(post_id):
+    """Update a post (only by owner). Body: { content }"""
+    try:
+        post = post_model.get_post_by_id(post_id)
+        if not post:
+            return jsonify({"error": "Post not found"}), 404
+
+        if str(post["user_id"]) != request.user_id:
+            return jsonify({"error": "Unauthorized"}), 403
+
+        data = request.json or {}
+        content = (data.get("content") or "").strip()
+
+        if not content:
+            return jsonify({"error": "Content is required"}), 400
+
+        if len(content) > 500:
+            return jsonify({"error": "Content must be 500 characters or less"}), 400
+
+        post_model.update_post(post_id, {"content": content})
+        updated_post = post_model.get_post_by_id(post_id)
+
+        return jsonify({
+            "message": "Post updated",
+            "post": _format_post(updated_post, request.user_id)
+        }), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/posts/<post_id>', methods=['DELETE'])
+@jwt_required
+def delete_post(post_id):
+    """Delete a post (only by owner)."""
+    try:
+        deleted = post_model.delete_post(post_id, request.user_id)
+        if not deleted:
+            return jsonify({"error": "Post not found or unauthorized"}), 404
+
+        return jsonify({"message": "Post deleted successfully"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/posts/<post_id>/like', methods=['POST'])
+@jwt_required
+def like_post(post_id):
+    """Like or unlike a post (toggle)."""
+    try:
+        result = post_model.like_post(post_id, request.user_id)
+        if result is None:
+            return jsonify({"error": "Post not found"}), 404
+
+        return jsonify({
+            "message": "Liked" if result["liked"] else "Unliked",
+            "liked": result["liked"],
+            "like_count": result["like_count"]
+        }), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/posts/<post_id>/comments', methods=['POST'])
+@jwt_required
+def add_comment(post_id):
+    """Add a comment to a post. Body: { text }"""
+    try:
+        data = request.json or {}
+        text = (data.get("text") or "").strip()
+
+        if not text:
+            return jsonify({"error": "Comment text is required"}), 400
+
+        if len(text) > 300:
+            return jsonify({"error": "Comment must be 300 characters or less"}), 400
+
+        success = post_model.add_comment(post_id, request.user_id, text)
+        if not success:
+            return jsonify({"error": "Post not found"}), 404
+
+        return jsonify({"message": "Comment added"}), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/users/<username>/posts', methods=['GET'])
+@jwt_required
+def get_user_posts(username):
+    """Get all posts by a specific user."""
+    try:
+        user = user_model.find_by_username(username)
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+
+        limit = int(request.args.get('limit', 50))
+        skip = int(request.args.get('skip', 0))
+
+        posts = post_model.get_user_posts(user["_id"], limit=limit, skip=skip)
+
+        return jsonify({
+            "posts": [_format_post(p, request.user_id) for p in posts],
+            "user": {
+                "id": str(user["_id"]),
+                "username": user.get("username"),
+                "name": user.get("name", "")
+            }
+        }), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
