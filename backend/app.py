@@ -381,11 +381,7 @@ def contribute_to_goal(goal_id):
 
             return jsonify({
                 "message": "Level up!",
-                "goal": {
-                    **updated_goal,
-                    '_id': str(updated_goal['_id']),
-                    'user_id': str(updated_goal['user_id'])
-                },
+                "goal": _format_goal(updated_goal),
                 "level_up": True,
                 "new_level": new_level,
                 "rewards": {
@@ -394,12 +390,9 @@ def contribute_to_goal(goal_id):
                 }
             }), 200
 
-        updated_goal['_id'] = str(updated_goal['_id'])
-        updated_goal['user_id'] = str(updated_goal['user_id'])
-
         return jsonify({
             "message": "Contribution added",
-            "goal": updated_goal,
+            "goal": _format_goal(updated_goal),
             "level_up": False
         }), 200
 
