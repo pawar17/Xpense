@@ -56,9 +56,12 @@ export const userService = {
 export const goalService = {
   create: (data) => api.post('/goals', data),
   getAll: () => api.get('/goals'),
+  getArchived: () => api.get('/goals/archived'),
   update: (goalId, data) => api.patch(`/goals/${goalId}`, data),
   reorder: (goalIds) => api.post('/goals/reorder', { goalIds }),
-  contribute: (goalId, amount) => api.post(`/goals/${goalId}/contribute`, { amount })
+  contribute: (goalId, amount) => api.post(`/goals/${goalId}/contribute`, { amount }),
+  archive: (goalId) => api.post(`/goals/${goalId}/archive`),
+  deleteGoal: (goalId) => api.delete(`/goals/${goalId}`)
 };
 
 // ============================================================================
@@ -119,9 +122,13 @@ export const bankStatementService = {
 // ============================================================================
 
 export const feedService = {
-  getFeed: (params) => api.get('/feed', { params: params || {} }),
+  getFeed: (params = {}) => api.get('/feed', { params: { type: params.type || 'all', limit: params.limit ?? 50, skip: params.skip ?? 0 } }),
+  createPost: (data) => api.post('/posts', data),
+  getPost: (postId) => api.get(`/posts/${postId}`),
   likePost: (postId) => api.post(`/posts/${postId}/like`),
-  addComment: (postId, data) => api.post(`/posts/${postId}/comments`, data),
+  addComment: (postId, data) => api.post(`/posts/${postId}/comments`, typeof data === 'string' ? { text: data } : data),
+  updatePost: (postId, data) => api.patch(`/posts/${postId}`, data),
+  deletePost: (postId) => api.delete(`/posts/${postId}`),
 };
 
 // ============================================================================

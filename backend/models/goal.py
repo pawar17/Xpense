@@ -43,14 +43,16 @@ class Goal:
         result = self.collection.insert_one(goal)
         return result.inserted_id
 
-    def get_user_goals(self, user_id, status=None):
-        """Get all goals for a user"""
+    def get_user_goals(self, user_id, status=None, exclude_archived=False):
+        """Get all goals for a user. exclude_archived=True returns only active/queued/pending/completed (not archived)."""
         if isinstance(user_id, str):
             user_id = ObjectId(user_id)
 
         query = {"user_id": user_id}
         if status:
             query["status"] = status
+        elif exclude_archived:
+            query["status"] = {"$nin": ["archived"]}
 
         return list(self.collection.find(query).sort([("order", 1), ("created_at", -1)]))
 
@@ -131,6 +133,8 @@ class Goal:
         )
         if status == "completed":
             self._activate_next_goal(goal["user_id"], goal["order"])
+            # Auto-archive so achieved goals "go away" from main list and can be viewed in Archived
+            self.archive_goal(goal_id, goal["user_id"])
         return result, remainder
 
     def set_level_system(self, goal_id, total_levels, level_thresholds, daily_target):
@@ -215,7 +219,7 @@ class Goal:
                 }
             }
         )
-        return result
+        return result.modified_count > 0
 
     def get_archived_goals(self, user_id):
         """Get all archived goals for a user"""

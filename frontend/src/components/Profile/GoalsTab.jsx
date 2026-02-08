@@ -6,6 +6,9 @@ export default function GoalsTab({ goals: initialGoals, onGoalsChange }) {
   const [goals, setGoals] = useState(initialGoals || []);
   const [editingId, setEditingId] = useState(null);
   const [showAdd, setShowAdd] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
+  const [archivedGoals, setArchivedGoals] = useState([]);
+  const [archivedLoading, setArchivedLoading] = useState(false);
   const [form, setForm] = useState({ goal_name: '', goal_category: 'other', target_amount: '', target_date: '' });
 
   useEffect(() => {
@@ -70,6 +73,41 @@ export default function GoalsTab({ goals: initialGoals, onGoalsChange }) {
     if (ni < 0 || ni >= next.length) return;
     [next[index], next[ni]] = [next[ni], next[index]];
     handleReorder(next.map((g) => g._id));
+  };
+
+  const fetchArchived = async () => {
+    setArchivedLoading(true);
+    try {
+      const { data } = await goalService.getArchived();
+      setArchivedGoals(data.goals || []);
+      setShowArchived(true);
+    } catch (_) {
+      setArchivedGoals([]);
+    } finally {
+      setArchivedLoading(false);
+    }
+  };
+
+  const handleArchive = async (goalId) => {
+    try {
+      await goalService.archive(goalId);
+      toast.success('Goal archived');
+      refreshGoals();
+      if (showArchived) fetchArchived();
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Archive failed');
+    }
+  };
+
+  const handleDeleteArchived = async (goalId) => {
+    if (!window.confirm('Permanently delete this goal from archive?')) return;
+    try {
+      await goalService.deleteGoal(goalId);
+      toast.success('Goal deleted');
+      setArchivedGoals((prev) => prev.filter((g) => g._id !== goalId));
+    } catch (err) {
+      toast.error(err.response?.data?.error || 'Delete failed');
+    }
   };
 
   const categories = ['other', 'house', 'vacation', 'debt', 'shopping', 'emergency'];
@@ -184,14 +222,69 @@ export default function GoalsTab({ goals: initialGoals, onGoalsChange }) {
                     >
                       Edit
                     </button>
+                    {(goal.status === 'completed' || goal.status === 'pending') && (
+                      <button
+                        type="button"
+                        onClick={() => handleArchive(goal._id)}
+                        className="text-[10px] font-mono uppercase text-brand-pink"
+                      >
+                        Archive
+                      </button>
+                    )}
                   </div>
                 </div>
-                <p className="text-[9px] text-gray-400 mt-1">Queue order: {index + 1}</p>
+                <p className="text-[9px] text-gray-400 mt-1">
+                  Queue order: {index + 1}
+                  {goal.status && goal.status !== 'active' && goal.status !== 'queued' && (
+                    <span className="ml-2 px-1.5 py-0.5 rounded bg-brand-cream uppercase font-bold">{goal.status}</span>
+                  )}
+                </p>
               </>
             )}
           </li>
         ))}
       </ul>
+
+      <section className="border-t-2 border-brand-black pt-6">
+        <div className="flex justify-between items-center pb-2">
+          <h3 className="font-heading text-lg uppercase tracking-tighter">Archived goals</h3>
+          <button
+            type="button"
+            onClick={() => (showArchived ? setShowArchived(false) : fetchArchived())}
+            className="text-[10px] font-mono uppercase text-gray-600 hover:text-brand-black"
+          >
+            {archivedLoading ? 'Loading…' : showArchived ? 'Hide archived' : 'View archived'}
+          </button>
+        </div>
+        {showArchived && (
+          <ul className="space-y-3">
+            {archivedGoals.length === 0 ? (
+              <li className="text-sm text-gray-500 font-mono">No archived goals. Achieved goals move here automatically.</li>
+            ) : (
+              archivedGoals.map((goal) => (
+                <li key={goal._id} className="editorial-card p-4 bg-brand-cream/50 flex justify-between items-start gap-2">
+                  <div>
+                    <p className="font-bold">{goal.goal_name}</p>
+                    <p className="text-xs text-gray-500">
+                      ${Number(goal.current_amount || 0).toLocaleString()} / ${Number(goal.target_amount || 0).toLocaleString()}
+                      {goal.completed_at && (
+                        <span className="ml-2">Completed {new Date(goal.completed_at).toLocaleDateString()}</span>
+                      )}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteArchived(goal._id)}
+                    className="text-[10px] font-mono uppercase text-red-600 hover:text-red-700"
+                  >
+                    Delete
+                  </button>
+                </li>
+              ))
+            )}
+          </ul>
+        )}
+      </section>
     </div>
   );
 }

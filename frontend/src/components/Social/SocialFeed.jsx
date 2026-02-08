@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
-export default function SocialFeed({ posts, onNudge, onLike, onComment, onRefresh }) {
+export default function SocialFeed({ posts, loading, onNudge, onLike, onComment, onRefresh }) {
   const [expandedPost, setExpandedPost] = useState(null);
   const [commentTexts, setCommentTexts] = useState({});
   const [submittingComment, setSubmittingComment] = useState({});
@@ -33,7 +33,9 @@ export default function SocialFeed({ posts, onNudge, onLike, onComment, onRefres
 
   return (
     <div className="space-y-4">
-      {posts.map((post, index) => (
+      {loading && <p className="text-center text-sm text-gray-500 font-mono py-4">Loading feed…</p>}
+      {!loading && posts.length === 0 && <p className="text-center text-sm text-gray-500 font-mono py-4">No posts yet. Share an update above!</p>}
+      {!loading && posts.map((post, index) => (
         <motion.div
           key={post.id}
           initial={{ opacity: 0, x: -10 }}

@@ -507,9 +507,9 @@ def create_goal():
 @app.route('/api/goals', methods=['GET'])
 @jwt_required
 def get_goals():
-    """Get all user goals with daily commitment and levels 1-50."""
+    """Get all user goals (active, queued, pending, completed). Archived goals are excluded; use GET /goals/archived."""
     try:
-        goals = goal_model.get_user_goals(request.user_id)
+        goals = goal_model.get_user_goals(request.user_id, exclude_archived=True)
         return jsonify({"goals": [_format_goal(g) for g in goals]}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -543,7 +543,7 @@ def contribute_to_goal(goal_id):
         amount_left = remainder
         # If contribution exceeded goal target, apply remainder to next active goal
         while amount_left > 0:
-            goals = goal_model.get_user_goals(request.user_id)
+            goals = goal_model.get_user_goals(request.user_id, exclude_archived=True)
             next_active = next((g for g in goals if g["status"] == "active"), None)
             if not next_active:
                 break
@@ -555,11 +555,11 @@ def contribute_to_goal(goal_id):
                 break
             amount_left = remainder
 
-        # Get updated goal (the one user originally contributed to)
+        # Get updated goal (the one user originally contributed to; may be archived now)
         updated_goal = goal_model.get_goal_by_id(goal_id)
         new_level = updated_goal['current_level'] if updated_goal else old_level
-        is_completed = updated_goal and updated_goal['status'] == 'completed'
-        was_not_completed = goal['status'] != 'completed'
+        is_completed = updated_goal and updated_goal['status'] in ('completed', 'archived')
+        was_not_completed = goal['status'] not in ('completed', 'archived')
 
         # Award points if leveled up
         points_earned = 0
@@ -569,10 +569,27 @@ def contribute_to_goal(goal_id):
             points_earned = (new_level - old_level) * 50
             currency_earned = (new_level - old_level) * 25
 
-        # Award +10 XP bonus if goal was just completed
+        # Bonus when goal is just achieved: +10 XP base, +5 XP if completed on or before target date
         if is_completed and was_not_completed:
             points_earned += 10
-            message = "🎉 Goal completed! +10 XP bonus!"
+            on_time = False
+            if updated_goal.get('target_date') and updated_goal.get('completed_at'):
+                from datetime import datetime
+                td = updated_goal['target_date']
+                ca = updated_goal['completed_at']
+                if isinstance(td, str):
+                    td = datetime.fromisoformat(td.replace('Z', '+00:00'))
+                try:
+                    t_naive = td.replace(tzinfo=None) if getattr(td, 'tzinfo', None) else td
+                    c_naive = ca.replace(tzinfo=None) if getattr(ca, 'tzinfo', None) else ca
+                    on_time = c_naive <= t_naive
+                except Exception:
+                    on_time = True
+            if on_time and updated_goal.get('target_date'):
+                points_earned += 5
+                message = "🎉 Goal achieved on time! +15 XP bonus!"
+            else:
+                message = "🎉 Goal completed! +10 XP bonus!"
         elif new_level > old_level:
             message = "Level up!"
         else:
@@ -1078,7 +1095,7 @@ def reorder_goals():
             goal = goal_model.get_goal_by_id(gid)
             if goal and str(goal["user_id"]) == request.user_id:
                 goal_model.update_goal(gid, {"order": i})
-        goals = goal_model.get_user_goals(request.user_id)
+        goals = goal_model.get_user_goals(request.user_id, exclude_archived=True)
         return jsonify({"goals": [_format_goal(g) for g in goals]}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -1193,6 +1210,7 @@ def _format_goal(g):
         "daily_target": g.get("daily_target", 0),
         "status": g.get("status", "active"),
         "order": g.get("order", 0),
+        "completed_at": g.get("completed_at").isoformat() if g.get("completed_at") and hasattr(g.get("completed_at"), "isoformat") else None,
         "daily_commitment": extra["daily_commitment"],
         "suggested_levels": extra["suggested_levels"],
         "amount_per_level": extra["amount_per_level"],

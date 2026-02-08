@@ -6,15 +6,18 @@ const GameContext = createContext();
 
 function toAppGoal(g) {
   if (!g) return null;
+  const dailyTarget = Number(g.daily_target ?? g.daily_commitment ?? 0);
+  const totalLevels = Number(g.total_levels ?? g.suggested_levels ?? 10);
+  const level = Number(g.current_level ?? 0);
   return {
     id: g._id,
     name: g.goal_name,
     category: g.goal_category || 'other',
     targetAmount: Number(g.target_amount),
     currentAmount: Number(g.current_amount),
-    level: g.current_level ?? 1,
-    totalLevels: g.total_levels ?? 1,
-    dailyTarget: Number(g.daily_target ?? 0),
+    level: totalLevels > 0 ? Math.min(level, totalLevels) : 0,
+    totalLevels,
+    dailyTarget,
     milestones: [],
   };
 }
