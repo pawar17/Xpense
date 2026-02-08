@@ -56,9 +56,12 @@ export const userService = {
 export const goalService = {
   create: (data) => api.post('/goals', data),
   getAll: () => api.get('/goals'),
+  getArchived: () => api.get('/goals/archived'),
   update: (goalId, data) => api.patch(`/goals/${goalId}`, data),
   reorder: (goalIds) => api.post('/goals/reorder', { goalIds }),
-  contribute: (goalId, amount) => api.post(`/goals/${goalId}/contribute`, { amount })
+  contribute: (goalId, amount) => api.post(`/goals/${goalId}/contribute`, { amount }),
+  archive: (goalId) => api.post(`/goals/${goalId}/archive`),
+  deleteGoal: (goalId) => api.delete(`/goals/${goalId}`)
 };
 
 // ============================================================================
@@ -112,6 +115,20 @@ export const bankStatementService = {
   upload: (formData) => api.post('/bank-statements/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } }),
   spendingAnalysis: () => api.get('/bank-statements/spending-analysis'),
   delete: (statementId) => api.delete(`/bank-statements/${statementId}`)
+};
+
+// ============================================================================
+// FEED & POSTS
+// ============================================================================
+
+export const feedService = {
+  getFeed: (params = {}) => api.get('/feed', { params: { type: params.type || 'all', limit: params.limit ?? 50, skip: params.skip ?? 0 } }),
+  createPost: (data) => api.post('/posts', data),
+  getPost: (postId) => api.get(`/posts/${postId}`),
+  likePost: (postId) => api.post(`/posts/${postId}/like`),
+  addComment: (postId, text) => api.post(`/posts/${postId}/comments`, { text }),
+  updatePost: (postId, data) => api.patch(`/posts/${postId}`, data),
+  deletePost: (postId) => api.delete(`/posts/${postId}`),
 };
 
 // ============================================================================

@@ -19,7 +19,7 @@ import AIChat from './components/Chat/AIChat';
 import GameWorld from './components/World/GameWorld';
 import Confetti from './components/Feedback/Confetti';
 import { MOCK_FEED, MOCK_FRIENDS } from './constants';
-import { vetoService, gamificationService, friendsService, nudgeService, questService } from './services/api';
+import { vetoService, gamificationService, friendsService, nudgeService, questService, feedService } from './services/api';
 import toast from 'react-hot-toast';
 
 const pageVariants = {
@@ -55,7 +55,10 @@ export default function App() {
   const [showFriendPicker, setShowFriendPicker] = useState(false);
   const [showAddVeto, setShowAddVeto] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
-  const [feed] = useState(MOCK_FEED);
+  const [feed, setFeed] = useState([]);
+  const [feedLoading, setFeedLoading] = useState(false);
+  const [postContent, setPostContent] = useState('');
+  const [postSubmitting, setPostSubmitting] = useState(false);
   const [vetoRequests, setVetoRequests] = useState([]);
   const [friends, setFriends] = useState([]);
   const [nudgedUserIds, setNudgedUserIds] = useState([]);
@@ -163,10 +166,23 @@ export default function App() {
     }
   }, [activeTab]);
 
+  const fetchFeed = async () => {
+    setFeedLoading(true);
+    try {
+      const { data } = await feedService.getFeed({ type: 'all', limit: 50 });
+      setFeed(data.posts || []);
+    } catch (_) {
+      setFeed([]);
+    } finally {
+      setFeedLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (activeTab === 'social') {
       fetchStats();
       fetchVetoRequests();
+      fetchFeed();
     }
   }, [activeTab]);
 
@@ -192,7 +208,10 @@ export default function App() {
 
   const handleContribute = async (goalId, amount) => {
     const data = await contribute(goalId, amount);
-    if (data?.level_up) {
+    if (data?.goal_completed) {
+      toast.success(data.message || '🎉 Goal achieved!');
+      triggerConfetti();
+    } else if (data?.level_up) {
       toast.success(`Level up! +${data.rewards?.points ?? 0} XP, +${data.rewards?.currency ?? 0} coins`);
       triggerConfetti();
     } else {
@@ -636,7 +655,59 @@ export default function App() {
               </section>
               <section className="space-y-6">
                 <h2 className="font-heading text-2xl uppercase tracking-tighter">Feed</h2>
-                <SocialFeed posts={feed} onNudge={() => setShowFriendPicker(true)} />
+                <form
+                  onSubmit={async (e) => {
+                    e.preventDefault();
+                    const content = postContent?.trim();
+                    if (!content || postSubmitting) return;
+                    setPostSubmitting(true);
+                    try {
+                      await feedService.createPost({ content });
+                      setPostContent('');
+                      await fetchFeed();
+                      toast.success('Post shared!');
+                    } catch (err) {
+                      toast.error(err.response?.data?.error || 'Failed to post');
+                    } finally {
+                      setPostSubmitting(false);
+                    }
+                  }}
+                  className="editorial-card p-4 flex gap-2 bg-white"
+                >
+                  <input
+                    type="text"
+                    value={postContent}
+                    onChange={(e) => setPostContent(e.target.value)}
+                    placeholder="Share an update..."
+                    maxLength={500}
+                    className="flex-1 border-2 border-brand-black px-4 py-3 rounded-xl font-mono text-sm focus:outline-none"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!postContent?.trim() || postSubmitting}
+                    className="py-3 px-4 bg-brand-black text-white text-[10px] font-mono font-bold uppercase tracking-widest rounded-xl disabled:opacity-50"
+                  >
+                    {postSubmitting ? '...' : 'Post'}
+                  </button>
+                </form>
+                <SocialFeed
+                  posts={feed}
+                  loading={feedLoading}
+                  onNudge={() => setShowFriendPicker(true)}
+                  onLike={async (postId) => {
+                    try {
+                      await feedService.likePost(postId);
+                      await fetchFeed();
+                    } catch (_) {}
+                  }}
+                  onComment={async (postId, text) => {
+                    try {
+                      await feedService.addComment(postId, text);
+                      await fetchFeed();
+                    } catch (_) {}
+                  }}
+                  onRefresh={fetchFeed}
+                />
               </section>
             </motion.div>
           )}
