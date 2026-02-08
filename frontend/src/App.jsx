@@ -17,7 +17,7 @@ import AIChat from './components/Chat/AIChat';
 import GameWorld from './components/World/GameWorld';
 import Confetti from './components/Feedback/Confetti';
 import { MOCK_FEED, MOCK_FRIENDS } from './constants';
-import { vetoService } from './services/api';
+import { vetoService, gamificationService } from './services/api';
 import toast from 'react-hot-toast';
 
 const pageVariants = {
@@ -39,6 +39,7 @@ export default function App() {
     acceptQuest,
     completeQuest,
     fetchAll,
+    fetchStats,
   } = useGame();
 
   const [activeTab, setActiveTab] = useState('home');
@@ -307,8 +308,19 @@ export default function App() {
                 goalType={appGoal?.category ?? 'other'}
                 progressPercent={appGoal ? (appGoal.currentAmount / appGoal.targetAmount) * 100 : 0}
                 currency={fullUser?.stats?.currency ?? 0}
-                onUpdateCurrency={(amount) => {}}
-                onAddPoints={() => {}}
+                onPlaceItem={async () => {
+                  try {
+                    const { data } = await gamificationService.placePopCityItem();
+                    await fetchStats();
+                    if (data?.points_earned != null) {
+                      toast.success(`Placed! +${data.points_earned} XP, −25 coins`);
+                    }
+                  } catch (err) {
+                    const msg = err.response?.data?.error || 'Could not place item';
+                    toast.error(msg);
+                    throw err;
+                  }
+                }}
               />
             </motion.div>
           )}

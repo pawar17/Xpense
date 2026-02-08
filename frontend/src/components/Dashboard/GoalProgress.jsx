@@ -31,8 +31,12 @@ export default function GoalProgress({ goal, onContribute }) {
             Lv. {goal.level} OF {goal.totalLevels}
           </span>
         </div>
-        <div className="text-3xl font-heading text-brand-black border-2 border-brand-black rounded-full w-14 h-14 flex items-center justify-center bg-brand-yellow">
-          {percentage}%
+        <div className="shrink-0 w-14 h-14 min-w-[3.5rem] min-h-[3.5rem] rounded-full border-2 border-brand-black bg-brand-yellow flex items-center justify-center p-1">
+          <span
+            className={`font-heading text-brand-black leading-none tabular-nums ${percentage >= 100 ? 'text-lg' : 'text-xl'}`}
+          >
+            {percentage}%
+          </span>
         </div>
       </div>
 

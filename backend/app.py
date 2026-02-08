@@ -190,6 +190,42 @@ def get_game_stats():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
+
+POP_CITY_COST = 25
+POP_CITY_POINTS = 25
+
+
+@app.route('/api/gamification/pop-city-place', methods=['POST'])
+@jwt_required
+def pop_city_place():
+    """Spend 25 currency and add 25 XP for placing one item in Pop City. Returns updated stats."""
+    try:
+        user = user_model.find_by_id(request.user_id)
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+        current_currency = user.get('game_currency', 0)
+        if current_currency < POP_CITY_COST:
+            return jsonify({"error": "Not enough coins", "currency": current_currency}), 400
+        user_model.update_game_stats(request.user_id, points=POP_CITY_POINTS, currency=-POP_CITY_COST)
+        user = user_model.find_by_id(request.user_id)
+        try:
+            streak = daily_flow_model.calculate_streak(request.user_id)
+        except Exception:
+            streak = user.get('current_streak', 0)
+        return jsonify({
+            "points_earned": POP_CITY_POINTS,
+            "currency_spent": POP_CITY_COST,
+            "stats": {
+                "points": user.get('game_points', 0),
+                "currency": user.get('game_currency', 0),
+                "streak": streak,
+                "longest_streak": user.get('longest_streak', 0),
+            }
+        }), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route('/api/gamification/leaderboard', methods=['GET'])
 def get_leaderboard():
     """Get leaderboard rankings"""

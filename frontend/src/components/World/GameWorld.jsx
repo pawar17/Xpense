@@ -5,48 +5,71 @@ import { WORLD_ITEMS } from '../../constants';
 const ITEM_COST = 25;
 
 function getGridCellIndex(rect, clientX, clientY) {
-  const left = rect.left;
-  const top = rect.top;
-  const w = rect.width;
-  const h = rect.height;
+  const { left, top, width: w, height: h } = rect;
   const x = clientX - left;
   const y = clientY - top;
   const col = Math.floor((x / w) * 5);
   const row = Math.floor((y / h) * 5);
-  const index = row * 5 + col;
-  return { col, row, index };
+  const colClamped = Math.max(0, Math.min(4, col));
+  const rowClamped = Math.max(0, Math.min(4, row));
+  const index = rowClamped * 5 + colClamped;
+  return { col: colClamped, row: rowClamped, index };
 }
 
-export default function GameWorld({ goalType, progressPercent, currency, onUpdateCurrency, onAddPoints }) {
+function isInsideGrid(rect, clientX, clientY) {
+  const { left, top, width: w, height: h } = rect;
+  const x = clientX - left;
+  const y = clientY - top;
+  return x >= 0 && x <= w && y >= 0 && y <= h;
+}
+
+export default function GameWorld({ goalType, progressPercent, currency, onPlaceItem, onUpdateCurrency, onAddPoints }) {
   const [placedItems, setPlacedItems] = useState({});
   const [hoveredTile, setHoveredTile] = useState(null);
   const [snapBackKeys, setSnapBackKeys] = useState({});
   const gridRef = useRef(null);
+  const lastPointerRef = useRef({ x: 0, y: 0 });
+  const hoveredTileRef = useRef(null);
 
   const unlockedCount = Math.max(4, Math.floor(progressPercent / 4));
   const items = WORLD_ITEMS[goalType] || WORLD_ITEMS.other;
   const canAfford = currency >= ITEM_COST;
 
   const handleDragEnd = (e, info, item) => {
+    const dropIndex = hoveredTileRef.current;
+    hoveredTileRef.current = null;
     setHoveredTile(null);
     if (!gridRef.current) {
       setSnapBackKeys((prev) => ({ ...prev, [item]: (prev[item] ?? 0) + 1 }));
       return;
     }
     const rect = gridRef.current.getBoundingClientRect();
-    const { col, row, index } = getGridCellIndex(rect, info.point.x, info.point.y);
+    const last = lastPointerRef.current;
+    const clientX = typeof e?.clientX === 'number' ? e.clientX : (info?.point?.x ?? last.x);
+    const clientY = typeof e?.clientY === 'number' ? e.clientY : (info?.point?.y ?? last.y);
+    const { index } = getGridCellIndex(rect, clientX, clientY);
+    const inside = isInsideGrid(rect, clientX, clientY);
+    const indexToUse = dropIndex != null ? dropIndex : (inside ? index : -1);
     const validDrop =
-      col >= 0 &&
-      col < 5 &&
-      row >= 0 &&
-      row < 5 &&
-      index < unlockedCount &&
-      !placedItems[index] &&
+      indexToUse >= 0 &&
+      indexToUse < unlockedCount &&
+      !placedItems[indexToUse] &&
       canAfford;
     if (validDrop) {
-      onUpdateCurrency?.(-ITEM_COST);
-      setPlacedItems((prev) => ({ ...prev, [index]: item }));
-      onAddPoints?.(25);
+      setPlacedItems((prev) => ({ ...prev, [indexToUse]: item }));
+      if (onPlaceItem) {
+        onPlaceItem().catch(() => {
+          setPlacedItems((prev) => {
+            const next = { ...prev };
+            delete next[indexToUse];
+            return next;
+          });
+          setSnapBackKeys((prev) => ({ ...prev, [item]: (prev[item] ?? 0) + 1 }));
+        });
+      } else {
+        onUpdateCurrency?.(-ITEM_COST);
+        onAddPoints?.(25);
+      }
     } else {
       setSnapBackKeys((prev) => ({ ...prev, [item]: (prev[item] ?? 0) + 1 }));
     }
@@ -55,10 +78,16 @@ export default function GameWorld({ goalType, progressPercent, currency, onUpdat
   const onDrag = (e, info) => {
     if (!gridRef.current) return;
     const rect = gridRef.current.getBoundingClientRect();
-    const { col, row, index } = getGridCellIndex(rect, info.point.x, info.point.y);
-    if (col >= 0 && col < 5 && row >= 0 && row < 5 && index < unlockedCount && !placedItems[index]) {
+    const clientX = typeof e?.clientX === 'number' ? e.clientX : info?.point?.x;
+    const clientY = typeof e?.clientY === 'number' ? e.clientY : info?.point?.y;
+    if (clientX != null && clientY != null) lastPointerRef.current = { x: clientX, y: clientY };
+    if (clientX == null || clientY == null) return;
+    const { index } = getGridCellIndex(rect, clientX, clientY);
+    if (isInsideGrid(rect, clientX, clientY) && index < unlockedCount && !placedItems[index]) {
+      hoveredTileRef.current = index;
       setHoveredTile(index);
     } else {
+      hoveredTileRef.current = null;
       setHoveredTile(null);
     }
   };
