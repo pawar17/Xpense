@@ -123,58 +123,18 @@ def _is_google_ai_configured():
 
 def ai_chat_assistant(user_message, user_context):
     """
-<<<<<<< HEAD
-    AI chatbot assistant for financial advice using Google Gemini API.
-    """
-    if not _is_google_ai_configured():
-        return (
-            "I can't connect to Google AI yet. To enable the chatbot:\n\n"
-            "1. Get a free API key at https://aistudio.google.com (Get API key)\n"
-            "2. In the Advisory project, open backend/.env\n"
-            "3. Set GOOGLE_AI_API_KEY=your_actual_key\n"
-            "4. Restart the backend server."
-=======
     AI chatbot that teaches finance concepts (down payments, emergency fund, APR, etc.)
     for the SavePop savings app.
     """
-    api_key = os.getenv('GOOGLE_AI_API_KEY')
-    if not api_key or api_key.strip() in ('', 'your_google_ai_api_key'):
+    if not _is_google_ai_configured():
         return (
             "To use the finance coach, add your Google AI (Gemini) API key in the backend .env file as GOOGLE_AI_API_KEY. "
             "Until then, here’s a quick tip: a down payment is the upfront cash you pay when buying something big (like a car or house); "
             "the rest you borrow. Saving for it first helps you pay less interest and get better terms."
->>>>>>> 18e9af6c9e0045dac463ff4b560df440b9e586ed
         )
 
     try:
         prompt = f"""
-<<<<<<< HEAD
-        You are a helpful, encouraging financial assistant for a gamified savings app.
-
-        User Context:
-        - Name: {user_context.get('name', 'there')}
-        - Current Goal: {user_context.get('goal_name', 'No active goal')}
-        - Progress: ${user_context.get('current_amount', 0)} / ${user_context.get('target_amount', 0)}
-        - Progress %: {user_context.get('progress_percent', 0)}%
-        - Current Streak: {user_context.get('current_streak', 0)} days
-        - Game Points: {user_context.get('points', 0)}
-        - Game Currency: {user_context.get('currency', 0)}
-
-        User Message: "{user_message}"
-
-        Provide helpful, motivating advice. Keep responses concise (2-3 sentences max).
-        If they ask about progress, celebrate achievements.
-        If struggling, offer practical tips.
-        Be friendly and use occasional emojis (1-2 max).
-        """
-
-        # Use gemini-pro (supported by API key / v1beta); gemini-1.5-flash returns 404 on this API
-        model = genai.GenerativeModel('gemini-pro')
-        response = model.generate_content(prompt)
-        if response and response.text:
-            return response.text.strip()
-        return "I didn't get a response this time. Try asking again in a moment!"
-=======
 You are SavePop's friendly finance coach. Your main job is to teach personal finance concepts in simple, short ways so users can learn while they save.
 
 You love explaining things like:
@@ -210,18 +170,13 @@ Rules:
                 print(f"AI chat failed with {model_name}: {fallback_e}")
                 continue
         return "Ask me about down payments, emergency funds, APR, or saving tips!"
->>>>>>> 18e9af6c9e0045dac463ff4b560df440b9e586ed
 
     except Exception as e:
         err = str(e).lower()
         print(f"AI chat failed: {e}")
-<<<<<<< HEAD
         if 'api_key' in err or 'invalid' in err or '403' in err or '401' in err:
             return (
                 "Google AI rejected the request. Check that GOOGLE_AI_API_KEY in backend/.env "
                 "is a valid key from https://aistudio.google.com and restart the backend."
             )
-        return "I'm having a brief connection hiccup. Try again in a moment!"
-=======
         return "I'm having trouble connecting right now. Try again in a bit—and remember: a down payment is the chunk you pay upfront so you borrow less and pay less interest!"
->>>>>>> 18e9af6c9e0045dac463ff4b560df440b9e586ed
